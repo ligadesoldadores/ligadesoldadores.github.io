@@ -111,6 +111,16 @@ h2 small{font-family:Barlow,sans-serif;font-size:12px;text-transform:none;letter
 .com{margin:10px 0 0 40px;padding:9px 11px;border-radius:10px;background:rgba(92,200,255,.08);border:1px solid rgba(92,200,255,.25);font-size:13.5px;line-height:1.4}
 .com b{display:block;font-size:11px;color:var(--blue);margin-bottom:2px;letter-spacing:.3px}
 .lnk{margin:8px 0 0 40px;font-size:13px;font-weight:700;color:var(--arc2)}
+.upl{display:inline-flex;align-items:center;gap:6px;margin:10px 0 0 40px;padding:9px 14px;border-radius:10px;background:linear-gradient(180deg,var(--arc2),var(--arc));color:#1b0f02;font-weight:700;font-size:13.5px}
+.upl.sec2{background:transparent;border:1px solid var(--arc);color:var(--arc2)}
+.upl:disabled{opacity:.6}
+.ent{margin:10px 0 0 40px;font-size:12.5px;color:var(--muted);display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.chip.pendientedecorregir{background:rgba(255,192,97,.13);border-color:rgba(255,192,97,.5);color:var(--arc2)}
+.chip.corregida{background:rgba(47,168,79,.15);border-color:rgba(47,168,79,.5);color:#7fdc98}
+.upmsg{margin:8px 0 0 40px;font-size:13px;color:var(--arc2);font-weight:600}
+.upmsg.err{color:#ff8e91}
+#foto{position:absolute;left:-9999px;width:1px;height:1px;opacity:0}
+.toast{position:fixed;left:50%;bottom:86px;transform:translateX(-50%);background:#2fa84f;color:#fff;font-weight:700;padding:12px 18px;border-radius:12px;z-index:20;box-shadow:0 8px 30px rgba(0,0,0,.45);font-size:15px}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin:10px 0 0 2px}
 .legend span:before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--c)}
 .rk{display:flex;align-items:center;gap:10px;padding:11px 14px;border-top:1px solid var(--line)}
@@ -189,6 +199,7 @@ ol.pasos li:before{content:counter(p);flex:none;width:26px;height:26px;border-ra
   <p class="foot" id="centro"></p>
 </section>
 
+<input type="file" id="foto" accept="image/*">
 <section id="panel" class="hidden">
   <div class="wrap">
     <div class="top"><div class="t">🏆 Liga de <span>Soldadores</span></div><button class="ghost" onclick="salir()">Salir</button></div>
@@ -316,12 +327,56 @@ function vPracticas(){
        '<span class="chip '+claseEstado(p.estado)+'">'+esc(p.estado)+'</span></div>'+
        '<div class="nota '+claseNota(p.nota)+'">'+num(p.nota)+'</div></div>';
     if(p.comentario) h+='<div class="com"><b>💬 COMENTARIO DEL PROFESOR</b>'+br(p.comentario)+'</div>';
+    var e=p.entrega;
+    if(e) h+='<div class="ent">📷 Entregada el '+esc(e.fecha)+' <span class="chip '+claseEstado(e.estado)+'">'+esc(e.estado)+'</span>'+(e.total>1?' · '+e.total+' fotos':'')+'</div>';
+    if(!e || e.total<(D.maxFotos||5)) h+='<button class="upl'+(e?' sec2':'')+'" id="b'+p.n+'" onclick="elegirFoto('+p.n+')">📷 '+(e?'Subir otra foto':'Entregar foto de la práctica')+'</button>';
+    h+='<div class="upmsg" id="m'+p.n+'"></div>';
     if(f) h+='<button class="lnk" onclick="ir(\'ficha\','+p.n+')">📘 Ver ficha de la práctica ›</button>';
     h+='</div>';
   });
   h+='</div><div class="legend"><span style="--c:var(--red)">Menos de 5</span><span style="--c:var(--green)">5 a 8</span><span style="--c:var(--purple)">9 y 10</span></div>';
   return h;
 }
+
+var subiendo=false, practicaFoto=null;
+function elegirFoto(n){
+  if(subiendo) return;
+  practicaFoto=n; var inp=$('foto'); inp.value=''; inp.click();
+}
+$('foto').onchange=function(){
+  var file=this.files&&this.files[0], n=practicaFoto;
+  if(!file||!n) return;
+  subiendo=true; msgFoto(n,'⏳ Preparando la foto…'); var bt=$('b'+n); if(bt) bt.disabled=true;
+  reducirFoto(file).then(function(b64){
+    msgFoto(n,'⏳ Subiendo… no cierres la app');
+    return fetch(API,{method:'POST',body:JSON.stringify({accion:'subir',u:cred.u,c:cred.c,p:n,img:b64}),credentials:'omit',redirect:'follow'})
+      .then(function(r){ if(!r.ok) throw new Error('http'); return r.json(); });
+  }).then(function(res){
+    subiendo=false;
+    if(!res.ok){ msgFoto(n,res.msg||'No se ha podido subir.',true); if(bt) bt.disabled=false; return; }
+    D.alumno.practicas.forEach(function(p){ if(p.n===n) p.entrega=res.entrega; });
+    ir('practicas'); aviso('✅ ¡Foto de la P'+n+' entregada!');
+  }).catch(function(){
+    subiendo=false; if(bt) bt.disabled=false;
+    msgFoto(n,'No se ha podido subir. Revisa la conexión e inténtalo otra vez.',true);
+  });
+};
+function msgFoto(n,t,err){var m=$('m'+n); if(m){m.textContent=t; m.className='upmsg'+(err?' err':'');}}
+function reducirFoto(file){
+  return new Promise(function(ok,ko){
+    var url=URL.createObjectURL(file), img=new Image();
+    img.onload=function(){
+      var max=1600, w=img.naturalWidth, h=img.naturalHeight, s=Math.min(1,max/Math.max(w,h));
+      var c=document.createElement('canvas'); c.width=Math.round(w*s); c.height=Math.round(h*s);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      URL.revokeObjectURL(url);
+      ok(c.toDataURL('image/jpeg',0.8).split(',')[1]);
+    };
+    img.onerror=function(){URL.revokeObjectURL(url); ko(new Error('img'));};
+    img.src=url;
+  });
+}
+function aviso(t){var d=document.createElement('div'); d.className='toast'; d.textContent=t; document.body.appendChild(d); setTimeout(function(){d.remove();},3500);}
 
 function vLiga(){
   var h='<h2>🏆 Clasificación<small>Top '+D.top.length+'</small></h2><div class="card">';
